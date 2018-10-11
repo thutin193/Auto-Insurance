@@ -1,0 +1,383 @@
+---
+title: "Auto-insurance Claim Prediction"
+author: "Thu Dao"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## 1.	Overview
+
+This dataset has 9,134 entries of customers from an anonymous auto insurance company with information on their demography (location type, education, employment status, gender, income, marital status) and their auto insurance plan (claim amount, monthly premium, months since last claim, months since policy inception, number of complaints, number of policies, policy type, claim reasons, vehicle class, vehicle size). 
+
+The goal for this analysis is to find how this information can be used to predict the insurance claim, which can be helpful and applicable for insurance companies to identify riskier customers and thus to customize suitable auto insurance plans.
+
+Set up
+```{r setup, include=FALSE}
+#Packages
+library(tidyverse)
+library(LEAP)
+library(lme4)
+library(caret)
+
+#Data
+autoinsurance <- read_csv("~/Documents/Documents/Study Materials/Third Year/Independent Study/autoinsurance.csv")
+```
+
+## 2.	Preliminary Analysis
+Sneak peak into the data
+```{r}
+dim(autoinsurance)
+colnames(autoinsurance)
+
+#There are 26 variables. 
+
+sum(is.na(autoinsurance))
+
+# This dataset is all filled!
+```
+The dataset contains 9,134 cases with 26 variables as listed below. There is no missing value in the dataset.
+
+```{r}
+#Reduce columns
+autoinsurance <- autoinsurance[c(4,7,8,10,11,12,13,14,15,16,17,18,19,20,22,24,25,26)]
+```
+
+We are interested in the "Total Claim variable"
+```{r}
+summary(autoinsurance$TOTAL_CLAIM)
+
+ggplot(autoinsurance, aes(x=TOTAL_CLAIM)) + geom_histogram(color="black", fill="sky blue")
+```
+
+```{r}
+library(e1071)
+
+skewness(autoinsurance$TOTAL_CLAIM)
+
+# It's very skewed. So I will transform the data.
+ggplot(autoinsurance, aes(x=log(TOTAL_CLAIM))) + geom_histogram(color="black", fill="sky blue")
+ggplot(autoinsurance, aes(x=sqrt(TOTAL_CLAIM))) + geom_histogram(color="black", fill="sky blue")
+
+# Sqrt data looks better. Let's create a new column for this. 
+autoinsurance <- autoinsurance %>%
+  mutate(SQRT_TOTAL_CLAIM = sqrt(TOTAL_CLAIM))
+
+skewness(autoinsurance$SQRT_TOTAL_CLAIM)
+
+summary(autoinsurance$SQRT_TOTAL_CLAIM)
+```
+Taking square root has considerably reduced the skewness. Sqrt(TOTAL_CLAIM) will be the new predicted value.
+
+```{r}
+# Factorize the categorical variables
+autoinsurance$STATE <- factor(autoinsurance$STATE)
+autoinsurance$COVERAGE <- factor(autoinsurance$COVERAGE)
+autoinsurance$EDUCATION <- factor(autoinsurance$EDUCATION)
+autoinsurance$EMPLOYMENT <- factor(autoinsurance$EMPLOYMENT)
+autoinsurance$GENDER <- factor(autoinsurance$GENDER)
+autoinsurance$LOCATION_CODE <- factor(autoinsurance$LOCATION_CODE)
+autoinsurance$MARITAL_STATUS <- factor(autoinsurance$MARITAL_STATUS)
+autoinsurance$POLICY_TYPE <- factor(autoinsurance$POLICY_TYPE)
+autoinsurance$CLAIM_REASON <- factor(autoinsurance$CLAIM_REASON)
+autoinsurance$VEHICLE_CLASS <- factor(autoinsurance$VEHICLE_CLASS)
+autoinsurance$VEHICLE_SIZE <- factor(autoinsurance$VEHICLE_SIZE)
+```
+
+```{r}
+# Create a subset of categorical variables
+num_var  <- autoinsurance[, c(6,9,10,11,12,13,16,19)]
+cat_var  <- autoinsurance[, -c(6,9,10,11,12,13,16,19)]
+```
+
+```{r}
+for (i in 1:11) { # Loop over loop.vector
+  
+  # Get uniques
+  print(unique(cat_var[,i]))
+}
+```
+
+```{r}
+# Random sample indexes
+set.seed(123)
+train_index <- sample(1:nrow(autoinsurance), 0.75 * nrow(autoinsurance))
+test_index <- setdiff(1:nrow(autoinsurance), train_index)
+
+# Split train test data
+train <- autoinsurance[train_index,]
+test <- autoinsurance[test_index,]
+
+num_var_train  <- train[, c(6,9,10,11,12,13,16,19)] #numerical variables  
+cat_var_train  <- train[, -c(6,9,10,11,12,13,16,19)] #categorical variables
+
+```
+
+```{r}
+# Categorical Variables: STATE, COVERAGE, EDUCATION, EMPLOYMENT, GENDER, CLAIM_REASON, LOCATION_CODE, MARITAL_STATUS, POLICY_TYPE, CLAIM_REASON, VEHICLE_CLASS, VEHICLE_SIZE
+```
+
+## 3. Fitting Multiple Linear Regression Model
+```{r}
+ggplot(autoinsurance, aes(x = STATE, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = COVERAGE, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = EDUCATION, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = EMPLOYMENT, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = GENDER, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = CLAIM_REASON, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = LOCATION_CODE, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = MARITAL_STATUS, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = POLICY_TYPE, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = CLAIM_REASON, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = VEHICLE_CLASS, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+ggplot(autoinsurance, aes(x = VEHICLE_SIZE, y = SQRT_TOTAL_CLAIM)) + geom_boxplot()
+```
+
+Looing at the boxplots, the mean between the groups mostly differ in LOCATION_CODE, EMPLOYMENT, VEHICLE_CLASS. 
+
+```{r}
+# ANOVA analysis
+anova(aov(SQRT_TOTAL_CLAIM ~ MARITAL_STATUS, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ EDUCATION, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ STATE, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ COVERAGE, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ EMPLOYMENT, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ CLAIM_REASON, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ LOCATION_CODE, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ VEHICLE_CLASS, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ POLICY_TYPE, data=train))
+
+anova(aov(SQRT_TOTAL_CLAIM ~ VEHICLE_SIZE, data=train))
+```
+
+The ANOVA result shows that there is not a significant difference in the group means between STATE and POLICY_TYPES. 
+
+One of the assumption of multiple regression is that the predictor variables are numeric or are categorical with maximal two categories. However in our dataset we have the variable region containing four categories. Normally we should use dummy variables. However this is something the lm function in R does automatically. 
+
+```{r}
+# Fitting the first model with all categorical variables
+fit1 <- lm(SQRT_TOTAL_CLAIM ~ STATE + COVERAGE + EDUCATION + EMPLOYMENT + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + POLICY_TYPE + VEHICLE_CLASS + VEHICLE_SIZE, data=train)
+
+summary(fit1)
+```
+
+```{r}
+# Remove STATE, POLICY_TYPE, the ones with no significance
+fit2 <- lm(SQRT_TOTAL_CLAIM ~ COVERAGE + EDUCATION + EMPLOYMENT + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + VEHICLE_CLASS + VEHICLE_SIZE,data=train)
+
+summary(fit2)
+```
+
+
+```{r}
+anova(fit1,fit2)
+```
+
+With a p value > 0.05, we can see that there is not much difference between model 2 and model 1. Thus we keep model 2 for less variables. Without STATE and POLICY_TYPE, both model explains 82.55% the variability in SQRT_TOTAL_CLAIM.
+
+Now, let's explore the numerical variables
+
+```{r}
+# Numerical variables: 
+cormatrix <- round(cor(num_var_train), 3)
+cormatrix
+```
+
+There is only noticeable correlation with INCOME and MONTHLY PREMIUM. 
+
+```{r}
+# Trying the models with numerical variables
+summary(lm(SQRT_TOTAL_CLAIM ~ INCOME, data = train))
+summary(lm(SQRT_TOTAL_CLAIM ~ MONTHLY_PREMIUM, data = train))
+```
+
+Each numerical variable alone explains a considerable percentage of the variability in SQRT_TOTAL_CLAIM. 
+
+
+```{r}
+ggplot(train, aes(x = INCOME, y = SQRT_TOTAL_CLAIM)) +
+ geom_point() +
+ geom_hline(yintercept = mean(train$SQRT_TOTAL_CLAIM)) +
+ geom_smooth(method='lm')
+
+ggplot(train, aes(x = MONTHLY_PREMIUM, y = SQRT_TOTAL_CLAIM)) +
+ geom_point() +
+ geom_hline(yintercept = mean(train$SQRT_TOTAL_CLAIM)) +
+ geom_smooth(method='lm')
+```
+The only problem is that we have a lot of people with 0 INCOME. These are also people who are Unemployed. This might be a colinearity problem for these two variables.
+
+
+```{r}
+# Incorporate numerical variables into the model
+fit3 = lm(SQRT_TOTAL_CLAIM ~ COVERAGE + EDUCATION + EMPLOYMENT + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + VEHICLE_CLASS + VEHICLE_SIZE + INCOME + MONTHLY_PREMIUM, data=train)
+summary(fit3)
+```
+
+Adding the two numerical variables increases 1 percent in the proportion of variability in Y explained by the model. the small p-value shows that both these variables are significant in the model.
+
+```{r}
+anova(fit2, fit3)
+```
+
+The anova analysis shows that model fit3 performs much better than model fit2. Now we explore the assumptions: 
+
+Independence assumption with durbin watson test:
+```{r}
+library(car)
+dwt(fit3)
+```
+It's very close to 2 and large p value => our independence assumption is met.
+
+```{r}
+#Checking multicolinearity
+vif(fit3)
+1/vif(fit3)
+mean(vif(fit3))
+```
+
+A VIF larger than 10 indicates multicolinearity. There seems to be multicolinearity between Vehicle Class and Monthly Premium. This makes sense. Keeping MONTHLY_PREMIUM gives a higher R-squared that keeping Vehicle Class. We keep MONTHLY_PREMIUM
+
+```{r}
+fit4 = lm(SQRT_TOTAL_CLAIM ~  COVERAGE + EDUCATION + EMPLOYMENT + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + MONTHLY_PREMIUM + VEHICLE_SIZE + INCOME, data=train)
+summary(fit4)
+```
+```{r}
+vif(fit4)
+```
+
+There is still multicolinearity between INCOME and EMPLOYMENT. This also makes sense. Removing INCOME gives a better model thatn removing EMPLOYMENT.. (82.55 > 82.3 Rsqure). Thus we keep EMPLOYMENT in the model.
+
+```{r}
+fit5 = lm(SQRT_TOTAL_CLAIM ~  COVERAGE + EDUCATION + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + MONTHLY_PREMIUM + VEHICLE_SIZE + EMPLOYMENT, data=train)
+summary(fit5)
+```
+
+```{r}
+vif(fit5)
+```
+Multicolinearity is all solved!
+
+```{r}
+plot(fit5)
+```
+
+Residual plots for the assumptions should be acceptable. However, the relationship is not completely linear and there might be a better statistical model to fit the data. 
+
+```{r}
+predlm <- predict(fit5, test)
+summary(predlm)
+summary(test$SQRT_TOTAL_CLAIM)
+
+library(ModelMetrics)
+
+RMSE(test$SQRT_TOTAL_CLAIM, predlm)
+```
+
+## 4. Decision Tree - Conditional Inference Trees
+
+Conditional Inference Trees avoids the variable selection bias of normal decision trees (and related methods). They tend to select variables that have many possible splits or many missing values. Unlike the others, Conditional Inference Trees uses a significance test procedure in order to select variables instead of selecting the variable that maximizes an information measure (e.g. Gini coefficient).
+
+The significance test, or better: the multiple significance tests computed at each start of the algorithm (select covariate - choose split - recurse) are permutation tests, that is, the "the distribution of the test statistic under the null hypothesis is obtained by calculating all possible values of the test statistic under rearrangements of the labels on the observed data points." (from the wikipedia article).
+
+(Source: Stack exchange https://stats.stackexchange.com/questions/12140/conditional-inference-trees-vs-traditional-decision-trees)
+
+Since we are interested in a lot of categorical predictors, let's try conditional inference tree:
+
+```{r}
+fit.tree <- train(
+  SQRT_TOTAL_CLAIM ~ COVERAGE + EDUCATION + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + MONTHLY_PREMIUM + VEHICLE_SIZE + EMPLOYMENT, data = train, method = "ctree2")
+plot(fit.tree$finalModel)
+```
+
+```{r}
+pred.tree <- predict(fit.tree, test)
+RMSE(test$SQRT_TOTAL_CLAIM, pred.tree)
+```
+
+The RMSE is higher compared to our fit5 multiple regression model. MONTHLY_PREMIUM is the variable that has the most possible split hence it appears in most of the nodes. Let's upgrade the tree to Random Forest.
+
+## 5. Random Forest
+
+Random forests are an ensemble learning method for classification, regression and other tasks, that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean prediction (regression) of the individual trees. Random decision forests correct for decision trees' habit of overfitting to their training set. 
+
+```{r}
+library(randomForest)
+
+train$SQRT_TOTAL_CLAIM <- as.numeric(train$SQRT_TOTAL_CLAIM)
+train$INCOME <- as.numeric(train$INCOME)
+train$MONTHLY_PREMIUM <- as.numeric(train$MONTHLY_PREMIUM)
+fit.rf = randomForest(SQRT_TOTAL_CLAIM ~ COVERAGE + EDUCATION + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + MONTHLY_PREMIUM + VEHICLE_SIZE + EMPLOYMENT, data=train)
+```
+
+```{r}
+fit.rf
+plot(fit.rf)
+```
+mtry: Number of variables randomly sampled as candidates at each split.
+ntree: Number of trees to grow.
+
+The plot illustatres error rate as we average across more trees and shows that the error rate stabalizes with around 200 trees, and slowly decrease afterwards. Rsqured = 86.43 is better than the multiple regression model.
+
+```{r}
+pred.rf <- predict(fit.rf, test)
+RMSE(test$SQRT_TOTAL_CLAIM, pred.rf)
+```
+RMSE = 2.677 is also smaller than RMSE = 2.979 in our multiple regression model. This Random Forest model seems to be a better model to fit. Now let's try tuning the parameters to see if we can achieve an even better Random Forest model
+
+```{r}
+# number of trees with lowest MSE
+which.min(fit.rf$mse)
+
+# RMSE of this optimal random forest
+sqrt(fit.rf$mse[which.min(fit.rf$mse)])
+```
+=> best ntree is 462, with RMSE = 462.
+
+```{r}
+finalfeatures <- train[c(2,3,4,5,7,8,9,15,18)]
+```
+
+Let's use tuneRf for quick and easy tuning assesment. tuneRF will start at a value of mtry that is suppled and increase by a certain step factor until the OOB error stops improving be a specified amount.The below starts with mtry = 3, just as our default model started, and increases by a factor of 1.5 until the OOB error stops improving by 1%.
+
+```{r}
+m2 <- tuneRF(
+  x          = finalfeatures,
+  y          = train$SQRT_TOTAL_CLAIM,
+  ntreeTry   = 500,
+  mtryStart  = 3,
+  stepFactor = 1.5,
+  improve    = 0.01,
+  trace      = FALSE      
+)
+```
+
+=> best mtry is 3, just as our default model.
+
+
+```{r}
+fit.rf3 = randomForest(SQRT_TOTAL_CLAIM ~ COVERAGE + EDUCATION + GENDER + CLAIM_REASON + LOCATION_CODE + MARITAL_STATUS + MONTHLY_PREMIUM + VEHICLE_SIZE + EMPLOYMENT, data=train, ntree=462)
+fit.rf3
+plot(fit.rf3)
+```
+```{r}
+pred.rf3 <- predict(fit.rf3, test)
+RMSE(test$SQRT_TOTAL_CLAIM, pred.rf3)
+```
+% var explained has slightly decreased and RMSE has slightly increase. Let's stick to the original model fit.rf.
+
+```{r}
+varImpPlot(fit.rf)
+```
+Variable importance plot. It's interesting that Location Code is the most important variable, followed by Monthly Premium and Employment. Marital Status, Coverage, Education, Claim Reason and Vehicle Size all add a smaller amount of importance to the model. Gender doesn't seem to be that predictive. 
+
+## 5. Conclusion
+A multiple regression has been fitted, explaining but since the relationship between the  is not completely linear, a better type of model might be better. Conditional Inference Trees and Random Forest are briefly explored. We conclude that out Random Forest model provides the best fit and prediction. 
